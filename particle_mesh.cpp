@@ -31,7 +31,11 @@ vector<double> vz( N, 0.0 );  // z velocity
 
 //// set grids
 
-int gridN = 8; // grid size
+int gridN = 8;           // grid number
+double L  = 7;           // total length of the cube
+double dx = L/(gridN-1); // length of one grid
+// for gridN = 8, L = 7, The value of the grids would be: -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5  
+
 vector< vector< vector<double> > > p  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // density
 vector< vector< vector<double> > > u  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // potential
 vector< vector< vector<double> > > ax ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // acceleration
