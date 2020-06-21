@@ -15,8 +15,8 @@ using namespace std;
 
 //// constants
 
-float G  = 1.0;    // gravitational constant
-float dt = 1.0e-2; // time interval
+float  G  = 1.0;    // gravitational constant
+double dt = 1.0e-2; // time interval
 
 //// set particles 
 
@@ -36,18 +36,18 @@ double L  = 7;           // total length of the cube
 double dx = L/(gridN-1); // length of one grid
 // for gridN = 8, L = 7, The value of the grids would be: -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5  
 
-vector< vector< vector<double> > > p  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // density
-vector< vector< vector<double> > > u  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // potential
-vector< vector< vector<double> > > ax ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // acceleration
-vector< vector< vector<double> > > ay ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); 
-vector< vector< vector<double> > > az ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); 
+//vector< vector< vector<double> > > p  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // density
+//vector< vector< vector<double> > > u  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // potential
+//vector< vector< vector<double> > > ax ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // acceleration
+//vector< vector< vector<double> > > ay ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); 
+//vector< vector< vector<double> > > az ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); 
 
 
 // functions
 
 double CalEnergy();
-void   Drift( float );
-
+void   Drift( double );
+void   Kick_CIC( double );
 // main function
 
 int main( int argc, char *argv[] )
@@ -57,7 +57,7 @@ int main( int argc, char *argv[] )
 
 	////two body motion
 
-	N = 2;	
+	N  = 2;	
 	m  = { 2.0, 1.0 };
 	x  = {-0.5, 1.0 };
 	y  = { 0.0, 0.0 };
@@ -70,7 +70,7 @@ int main( int argc, char *argv[] )
 	// calculate total energy
 	
 	double E0 = CalEnergy();
-	printf("initial total energy: %f\n",E0);	
+	/////////// printf("initial total energy: %f\n",E0);	
 
 
 	// time parameters
@@ -78,12 +78,14 @@ int main( int argc, char *argv[] )
 	double t = 0.0;
 	double period = 2.0*M_PI*sqrt( (x[1]*x[1]+y[1]*y[1])/(vx[1]*vx[1]+vy[1]*vy[1]) );
 	double end_time = 1.0*period;
-	printf("period: %f\n",period);
+	/////////// printf("period: %f\n",period);
 
 
 	// update particles
 
-	while( t<end_time ){
+	/////////// printf("x1     y1     z1     x2     y2     z2\n");	
+	printf("%f,%f,%f,%f,%f,%f\n",x[0],y[0],z[0],x[1],y[1],z[1]);
+	while( t<100.0*dt ){//end_time ){
 
 
 		// particle mesh
@@ -118,6 +120,7 @@ int main( int argc, char *argv[] )
 		*/
 	
 
+		printf("%f,%f,%f,%f,%f,%f\n",x[0],y[0],z[0],x[1],y[1],z[1]);
 
 		t += dt;
 	
@@ -128,7 +131,7 @@ int main( int argc, char *argv[] )
 	
 	double E = CalEnergy();
 	double energy_err = abs( (E-E0)/E0 );
-	printf("energy error: %f\n",energy_err);
+	/////////// printf("energy error: %f\n",energy_err);
 
 }
 
@@ -158,7 +161,7 @@ double CalEnergy()
 }
 
 
-void Drift( float delta_t )
+void Drift( double delta_t )
 {
 	for( int n = 0; n < N; n++ ){
 		x[n] += vx[n] * delta_t;
