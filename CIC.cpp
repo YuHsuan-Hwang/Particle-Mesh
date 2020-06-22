@@ -20,7 +20,6 @@ void Kick_CIC( double delta_t )
 {
 
 	// Mass Deposit
-
 	vector< vector< vector<double> > > p  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) );
 	vector< vector< vector<double> > > u  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) );
         
@@ -42,7 +41,7 @@ void Kick_CIC( double delta_t )
                 }
                 else{
                         x_index[n][1] = x_index[n][0] + 1;
-                        wx[n] = dx - wx[n];
+                        wx[n] = 1.0 - wx[n];
                 }
 
                 // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
@@ -55,7 +54,7 @@ void Kick_CIC( double delta_t )
                 }
                 else{
                         y_index[n][1] = y_index[n][0] + 1;
-                        wy[n] = dx - wy[n];
+                        wy[n] = 1.0 - wy[n];
                 }
 
 		z_index[n][0] = int( ( z[n]+L/2.0 )/dx );
@@ -66,7 +65,7 @@ void Kick_CIC( double delta_t )
                 }
                 else{
                         z_index[n][1] = z_index[n][0] + 1;
-                        wz[n] = dx - wz[n];
+                        wz[n] = 1.0 - wz[n];
                 }
 
 		for( int i = 0; i < 2; i++ ){
@@ -79,7 +78,7 @@ void Kick_CIC( double delta_t )
 	
 	}
 
-	/*
+	/*	
 	// check total mass
 	double m_tmp = 0.0;
 	for( int i = 0; i < gridN; i++ ){
@@ -143,8 +142,8 @@ void Kick_CIC( double delta_t )
         }
 	//out = compute_phi_k(gridN, L, out, G);
 	
-	//vector<double> k_vec = Linspace( 0, L, gridN );
-	vector<double> k_vec = {0.   ,  0.125,  0.25 ,  0.375, -0.5  , -0.375, -0.25 , -0.125};
+	vector<double> k_vec = Linspace( 0, L, gridN );
+	// vector<double> k_vec = {0.   ,  0.125,  0.25 ,  0.375, -0.5  , -0.375, -0.25 , -0.125};
 	for( int l = 0; l < gridN*gridN*gridN; l++ ){
 		
 		int k = l /gridN/gridN;
@@ -219,6 +218,7 @@ void Kick_CIC( double delta_t )
 				}
 			}
 		}
+		printf("ax_p %f \n",ax_p);
 		vx[n] += ax_p * delta_t;
 		vy[n] += ay_p * delta_t;
 		vz[n] += az_p * delta_t;

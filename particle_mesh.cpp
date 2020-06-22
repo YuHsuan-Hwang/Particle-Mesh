@@ -31,7 +31,7 @@ vector<double> vz( N, 0.0 );  // z velocity
 
 //// set grids
 
-int gridN = 8;           // grid number
+int gridN = 64;           // grid number
 double L  = 7;           // total length of the cube
 double dx = L/(gridN-1); // length of one grid
 // for gridN = 8, L = 7, The value of the grids would be: -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5  
@@ -85,7 +85,7 @@ int main( int argc, char *argv[] )
 
 	/////////// printf("x1     y1     z1     x2     y2     z2\n");	
 	printf("%f,%f,%f,%f,%f,%f\n",x[0],y[0],z[0],x[1],y[1],z[1]);
-	while( t<100.0*dt ){//end_time ){
+	while( t<1000.0*dt ){//end_time ){
 
 
 		// particle mesh
