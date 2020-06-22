@@ -17,7 +17,7 @@ const int N = 2 ;           // particle number
 const int gridN = 64;           // # of grid
 const int gridNk = 64;          // # of grid in Z direction
 const int total_grids = gridNk * gridN * gridN ;
-const int T = 500; // simulation time steps
+const int T = 300; // simulation time steps
 double Et , Es;    // energy for check 
 const double L = 30;      // box size
 const double Lz = L * gridNk / gridN;       // box size
@@ -95,6 +95,67 @@ void NGP(int p, double i, double j, double k, double* rho, double* x, double* y,
         rho[cc * gridN * gridN + bb * gridN + aa] += m[p] / (pow(dx, 3));
     }
 }
+void CIC(int p, double i, double j, double k, double* rho, double* x, double* y, double* z, double* matrix, double* m)
+{
+    double rx, ry, rz, wx, wy, wz;
+    rx = ry = rz = wx = wy = wz = 0;
+    for (int c = k - 1;c < k + 2;c++)
+        for (int b = j - 1;b < j + 2;b++)
+            for (int a = i - 1;a < i + 2;a++) {
+#pragma omp parallel sections
+                {
+#pragma omp section
+                    {
+                        rx = sqrt(pow((a * dx - (L / 2 - dx / 2)) - x[p], 2));
+                        if (rx <= dx / 2) { wx = 0.75 - pow(rx / dx, 2); }
+                        else if (rx <= 3 * dx / 2 && rx > dx / 2) { wx = pow(1.5 - rx / dx, 2) * 0.5; }
+                        else { wx = 0; }
+                    }
+#pragma omp section           
+                    {
+                        ry = sqrt(pow((b * dx - (L / 2 - dx / 2)) - y[p], 2));
+                        if (ry <= dx / 2) { wy = 0.75 - pow(ry / dx, 2); }
+                        else if (ry <= 3 * dx / 2 && ry > dx / 2) { wy = pow(1.5 - ry / dx, 2) * 0.5; }
+                        else { wy = 0; }
+                    }
+#pragma omp section
+                    {
+                        rz = sqrt(pow((c * dx - (Lz / 2 - dx / 2)) - z[p], 2));
+                        if (rz <= dx / 2) { wz = 0.75 - pow(rz / dx, 2); }
+                        else if (rz <= 3 * dx / 2 && rz > dx / 2) { wz = pow(1.5 - rz / dx, 2) * 0.5; }
+                        else { wz = 0; }
+                    }
+
+                }
+                //matrix[(a - (i - 1)) + (b - (j - 1)) * 3 + (c - (k - 1)) * 3 * 3 + p * 27] = wx * wy * wz;
+                int aa, bb, cc;
+#pragma omp parallel sections
+                {
+#pragma omp section
+                    {
+                        if (a >= gridN) { aa = a - gridN; }
+                        else if (a < 0) { aa = a + gridN; }
+                        else { aa = a; }
+                    }
+#pragma omp section
+                    {
+                        if (b >= gridN) { bb = b - gridN; }
+                        else if (b < 0) { bb = b + gridN; }
+                        else { bb = b; }
+                    }
+#pragma omp section
+                    {
+                        if (c >= gridNk) { cc = c - gridNk; }
+                        else if (c < 0) { cc = c + gridNk; }
+                        else { cc = c; }
+                    }
+                }
+#pragma omp critical
+                {
+                    rho[cc * gridN * gridN + bb * gridN + aa] += m[p] * wx * wy * wz / (pow(dx, 3));
+                }
+            }
+}
 void TSC(int p,int i,int j, int k, double *rho, double* x, double* y, double* z, double* m , double* matrix)
 {
     double rx, ry, rz, wx, wy, wz;
@@ -156,6 +217,24 @@ void TSC(int p,int i,int j, int k, double *rho, double* x, double* y, double* z,
         }
     }
 }
+//下面這個沒設邊界條件
+void TSC_compute_acc(int p, int i, int j, int k, double* matrix, double* acc_x, double* acc_y, double* acc_z)
+{
+    double ax, ay, az;
+    ax = ay = az = 0;
+    for (int a = i - 1; a < i + 2; a++)
+        for (int b = j - 1; b < j + 2; b++)
+            for (int c = k - 1; c < k + 2; c++) {
+                //printf("ABC: %d %d %d\n", a, b, c);
+                //printf("W: %f\n", matrix[p * 27 + (c - (k - 1)) * 3 * 3 + (b - (j - 1)) * 3 + (a - (i - 1))]);
+                ax = ax + acc_x[c * gridN * gridN + b * gridN + a] * matrix[p * 27 + (c - (k - 1)) * 3 * 3 + (b - (j - 1)) * 3 + (a - (i - 1))];
+                ay = ay + acc_y[c * gridN * gridN + b * gridN + a] * matrix[p * 27 + (c - (k - 1)) * 3 * 3 + (b - (j - 1)) * 3 + (a - (i - 1))];
+                az = az + acc_z[c * gridN * gridN + b * gridN + a] * matrix[p * 27 + (c - (k - 1)) * 3 * 3 + (b - (j - 1)) * 3 + (a - (i - 1))];
+            }
+    acc_x[k * gridN * gridN + j * gridN + i] = ax;
+    acc_y[k * gridN * gridN + j * gridN + i] = ay;
+    acc_z[k * gridN * gridN + j * gridN + i] = az;
+}
 void compute_rho(double* m,double* rho, double* x, double* y, double* z , int rate, int t, double* matrix) {
     // Zero-out rho for reuse
     memset(rho, 0, gridNk * gridN * gridN * sizeof(double));
@@ -170,8 +249,8 @@ void compute_rho(double* m,double* rho, double* x, double* y, double* z , int ra
         j = floor((y[p] - (-L / 2)) / dx);
         k = floor((z[p] - (-Lz / 2)) / dx);
         //#pragma omp critical
-        //TSC( p,i, j, k, rho,x ,y, z, m, matrix);
-        NGP(p, i, j, k, rho, x, y, z, m);
+        TSC( p,i, j, k, rho,x ,y, z, m, matrix);
+        //NGP(p, i, j, k, rho, x, y, z, m);
     }
 }
 void compute_phi_k(fftw_complex* rho_k ) {
@@ -205,6 +284,77 @@ void compute_phi_k(fftw_complex* rho_k ) {
                 }*/
             }
         }
+    }
+}
+void CIC_compute_acc(double* x, double* y, double* z, double* u, double* acc_x, double* acc_y, double* acc_z)
+{
+    vector< vector<int> > x_index(N, vector<int>(2, 0));
+    vector< vector<int> > y_index(N, vector<int>(2, 0));
+    vector< vector<int> > z_index(N, vector<int>(2, 0));
+
+    vector<double> wx(N, 0.0);
+    vector<double> wy(N, 0.0);
+    vector<double> wz(N, 0.0);
+    for (int n = 0; n < N; n++) {
+
+        int i, j, k;
+        i = floor((x[n] - (-L / 2)) / dx);
+        j = floor((y[n] - (-L / 2)) / dx);
+        k = floor((z[n] - (-Lz / 2)) / dx);
+
+        x_index[n][0] = int((x[n] + L / 2.0) / dx);
+        wx[n] = (x[n] + L / 2.0) / dx - x_index[n][0];
+        if (wx[n] > 0.5) {
+            x_index[n][1] = x_index[n][0];
+            x_index[n][0] += 1;
+        }
+        else {
+            x_index[n][1] = x_index[n][0] + 1;
+            wx[n] = 1.0 - wx[n];
+        }
+        // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
+
+        y_index[n][0] = int((y[n] + L / 2.0) / dx);
+        wy[n] = (y[n] + L / 2.0) / dx - y_index[n][0];
+        if (wy[n] > 0.5) {
+            y_index[n][1] = y_index[n][0];
+            y_index[n][0] += 1;
+        }
+        else {
+            y_index[n][1] = y_index[n][0] + 1;
+            wy[n] = 1.0 - wy[n];
+        }
+        z_index[n][0] = int((z[n] + L / 2.0) / dx);
+        wz[n] = (z[n] + L / 2.0) / dx - z_index[n][0];
+        if (wz[n] > 0.5) {
+            z_index[n][1] = z_index[n][0];
+            z_index[n][0] += 1;
+        }
+        else {
+            z_index[n][1] = z_index[n][0] + 1;
+            wz[n] = 1.0 - wz[n];
+        }
+        double ax_p = 0.0;
+        double ay_p = 0.0;
+        double az_p = 0.0;
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 2; j++) {
+                for (int k = 0; k < 2; k++) {
+                    double ax_p_tmp = u[x_index[n][i] + 1 + gridN * y_index[n][j] + gridN * gridN * z_index[n][k]] - u[x_index[n][i] - 1 + gridN * y_index[n][j] + gridN * gridN * z_index[n][k]];
+                    ax_p_tmp /= 2.0 * dx * total_grids;
+                    ax_p -= ax_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
+                    double ay_p_tmp = u[x_index[n][i] + gridN * (y_index[n][j] + 1) + gridN * gridN * z_index[n][k]] - u[x_index[n][i] + gridN * (y_index[n][j] - 1) + gridN * gridN * z_index[n][k]];
+                    ay_p_tmp /= 2.0 * dx * total_grids;
+                    ay_p -= ay_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
+                    double az_p_tmp = u[x_index[n][i] + gridN * y_index[n][j] + gridN * gridN * (z_index[n][k] + 1)] - u[x_index[n][i] + gridN * y_index[n][j] + gridN * gridN * (z_index[n][k] - 1)];
+                    az_p_tmp /= 2.0 * dx * total_grids;
+                    az_p -= az_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
+                }
+            }
+        }
+        acc_x[k * gridN * gridN + j * gridN + i] = ax_p;
+        acc_y[k * gridN * gridN + j * gridN + i] = ay_p;
+        acc_z[k * gridN * gridN + j * gridN + i] = az_p;
     }
 }
 void compute_accelerations(double* acc_x, double* acc_y, double* acc_z, double* phi) {
@@ -260,8 +410,9 @@ void compute_accelerations(double* acc_x, double* acc_y, double* acc_z, double* 
             }
     }
 }
-void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z)
+void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* matrix, double*phi)
 {
+    CIC_compute_acc(x, y, z, phi, a_x, a_y, a_z);
     for (int p = 0; p < N; p++) {
         int i, j, k;
         #pragma omp parallel
@@ -272,6 +423,8 @@ void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy
                 j = floor((y[p] - (-L / 2)) / dx);
                 k = floor((z[p] - (-Lz / 2)) / dx);
             }
+            //TSC_compute_acc(p, i, j, k, matrix, a_x, a_y, a_z);
+            
             #pragma omp sections
             {
                 #pragma omp section
@@ -343,32 +496,8 @@ void calculate_energy(double* m , double* x , double* y , double* z, double* vx,
     rr = sqrt(rx * rx + ry * ry + rz * rz);
     Es = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) - G * m[0] * m[1] / rr;
 }
-/*void TSC_compute_acc( int p, int i, int j, int k , double* matrix, double* acc_x, double* acc_y, double* acc_z) 
-{   
-    double ax, ay, az
-    for ( int a = i - 1 ; a < i + 2 ; a++)
-    for ( int b = j - 1 ; b < j + 2 ; b++)
-    for ( int c = k - 1 ; c < k + 2 ; c++) {
-        ax 
-        acc_x[c * gridN * gridN + b * gridN + a] 
 
-    }
-
-    
-    
-    acc_x[ k * gridN * gridN + j * gridN + i ] = 
-        acc_x[k * gridN * gridN + j * gridN + (i-1)] * matrix[ p * 27 +] + 
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i] * matrix[p * 27 + ] +
-        acc_x[k * gridN * gridN + j * gridN + i]
-}*/
-
-void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
+void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z, double* matrix , int t, int rate)
     {
 
         memset(rho, 0, gridNk * gridN * gridN * sizeof(double));
@@ -382,6 +511,10 @@ void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
         vector<double> wz(N, 0.0);
 
         for (int n = 0; n < N; n++) {
+            if (file.is_open() && fmod(t, rate) == 0) {
+                if (n != N - 1) { file << x[n] << "," << y[n] << "," << z[n] << ","; }
+                else { file << x[n] << "," << y[n] << "," << z[n] << "\n"; }
+            }
 
             x_index[n][0] = int((x[n] + L / 2.0) / dx);
             wx[n] = (x[n] + L / 2.0) / dx - x_index[n][0];
@@ -391,7 +524,7 @@ void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
             }
             else {
                 x_index[n][1] = x_index[n][0] + 1;
-                wx[n] = dx - wx[n];
+                wx[n] = 1.0 - wx[n];
             }
 
             // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
@@ -404,7 +537,7 @@ void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
             }
             else {
                 y_index[n][1] = y_index[n][0] + 1;
-                wy[n] = dx - wy[n];
+                wy[n] = 1.0 - wy[n];
             }
 
             z_index[n][0] = int((z[n] + L / 2.0) / dx);
@@ -415,13 +548,14 @@ void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
             }
             else {
                 z_index[n][1] = z_index[n][0] + 1;
-                wz[n] = dx - wz[n];
+                wz[n] = 1.0 - wz[n];
             }
 
             for (int i = 0; i < 2; i++) {
                 for (int j = 0; j < 2; j++) {
                     for (int k = 0; k < 2; k++) {
                         rho[x_index[n][i] + gridN * y_index[n][j] + gridN * gridN * z_index[n][k]] += m[n] * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]) / dx / dx / dx;
+                        matrix[z_index[n][k] * 2 * 2 + y_index[n][j] * 2 + x_index[n][i] + 8 * n] = abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
                     }
                 }
             }
@@ -430,98 +564,14 @@ void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z)
 
     }
 
-void Kick_CIC(double delta_t ,double* x, double* y, double* z, double* vx, double* vy, double* vz, double* u)
-    {
-        vector< vector<int> > x_index(N, vector<int>(2, 0));
-        vector< vector<int> > y_index(N, vector<int>(2, 0));
-        vector< vector<int> > z_index(N, vector<int>(2, 0));
 
-        vector<double> wx(N, 0.0);
-        vector<double> wy(N, 0.0);
-        vector<double> wz(N, 0.0);
-
-        for (int n = 0; n < N; n++) {
-
-            x_index[n][0] = int((x[n] + L / 2.0) / dx);
-            wx[n] = (x[n] + L / 2.0) / dx - x_index[n][0];
-            if (wx[n] > 0.5) {
-                x_index[n][1] = x_index[n][0];
-                x_index[n][0] += 1;
-            }
-            else {
-                x_index[n][1] = x_index[n][0] + 1;
-                wx[n] = dx - wx[n];
-            }
-
-            // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
-
-            y_index[n][0] = int((y[n] + L / 2.0) / dx);
-            wy[n] = (y[n] + L / 2.0) / dx - y_index[n][0];
-            if (wy[n] > 0.5) {
-                y_index[n][1] = y_index[n][0];
-                y_index[n][0] += 1;
-            }
-            else {
-                y_index[n][1] = y_index[n][0] + 1;
-                wy[n] = dx - wy[n];
-            }
-
-            z_index[n][0] = int((z[n] + L / 2.0) / dx);
-            wz[n] = (z[n] + L / 2.0) / dx - z_index[n][0];
-            if (wz[n] > 0.5) {
-                z_index[n][1] = z_index[n][0];
-                z_index[n][0] += 1;
-            }
-            else {
-                z_index[n][1] = z_index[n][0] + 1;
-                wz[n] = dx - wz[n];
-            }
-
-
-            double ax_p = 0.0;
-            double ay_p = 0.0;
-            double az_p = 0.0;
-            for (int i = 0; i < 2; i++) {
-                for (int j = 0; j < 2; j++) {
-                    for (int k = 0; k < 2; k++) {
-
-                        double ax_p_tmp = u[x_index[n][i] + 1 + gridN * y_index[n][j]+ gridN * gridN * z_index[n][k]] - u[x_index[n][i] - 1+ gridN * y_index[n][j]+ gridN * gridN * z_index[n][k]];
-                        ax_p_tmp /= 2.0 * dx;
-                        ax_p -= ax_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
-
-                        double ay_p_tmp = u[x_index[n][i] + gridN * y_index[n][j] + 1+ gridN * gridN * z_index[n][k]] - u[x_index[n][i] + gridN * y_index[n][j] - 1 + gridN * gridN * z_index[n][k]];
-                        ay_p_tmp /= 2.0 * dx;
-                        ay_p -= ay_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
-
-                        double az_p_tmp = u[x_index[n][i]+ gridN * y_index[n][j]+ gridN * gridN * z_index[n][k] + 1] - u[x_index[n][i]+ gridN * y_index[n][j]+ gridN * gridN * z_index[n][k] - 1];
-                        az_p_tmp /= 2.0 * dx;
-                        az_p -= az_p_tmp * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
-
-                    }
-                }
-            }
-            vx[n] += ax_p * delta_t;
-            vy[n] += ay_p * delta_t;
-            vz[n] += az_p * delta_t;
-        }
-
-
-
-    }
-
-void update_particle_KDK_CIC(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* phi)
+/*void update_particle_KDK_CIC(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* phi)
 {
     for (int p = 0; p < N; p++) {
         int i, j, k;
 #pragma omp parallel
         {
-#pragma omp single
-            {
-                i = floor((x[p] - (-L / 2)) / dx);
-                j = floor((y[p] - (-L / 2)) / dx);
-                k = floor((z[p] - (-Lz / 2)) / dx);
-            }
-            Kick_CIC(0.5 * dt, x, y, z, vx, vy, vz, phi);
+
 #pragma omp sections
             {
 #pragma omp section
@@ -542,8 +592,48 @@ void update_particle_KDK_CIC(double* x, double* y, double* z, double* vx, double
         BC_for_particle(p, x, y, z);
     }
 }
-
-
+void update_particle_DKD_CIC(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* phi)
+{
+    for (int p = 0; p < N; p++) {
+        int i, j, k;
+#pragma omp parallel
+        {
+#pragma omp sections
+            {
+#pragma omp section
+                {
+                    x[p] = x[p] + vx[p] *0.5* dt;
+                }
+#pragma omp section
+                {
+                    y[p] = y[p] + vy[p] * 0.5 * dt;
+                }
+#pragma omp section
+                {
+                    z[p] = z[p] + vz[p] * 0.5 * dt;
+                }
+            }
+            Kick_CIC(1.0 * dt, x, y, z, vx, vy, vz, phi);
+#pragma omp sections
+            {
+#pragma omp section
+                {
+                    x[p] = x[p] + vx[p] * 0.5 * dt;
+                }
+#pragma omp section
+                {
+                    y[p] = y[p] + vy[p] * 0.5 * dt;
+                }
+#pragma omp section
+                {
+                    z[p] = z[p] + vz[p] * 0.5 * dt;
+                }
+            }
+        }
+        BC_for_particle(p, x, y, z);
+    }
+}
+*/
 int main(int argc, char* argv[])
 {
     fftw_complex* rho_k = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * ((gridN >> 1) + 1) * gridN * gridNk);
@@ -561,7 +651,11 @@ int main(int argc, char* argv[])
     double* a_y = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* a_z = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* TSC_matrix = (double*)malloc( 27 * N * sizeof(double));
+    double* CIC_matrix = (double*)malloc( 8 * N * sizeof(double));
 
+    for (int i = 0; i < N; i++) {
+        TSC_matrix[13 + i * 27] = 1.0;
+    }
     m[0] = 800.0 ;
     m[1] = 800.0 ;
     x[0] = -2.0;
@@ -587,21 +681,20 @@ int main(int argc, char* argv[])
     
     for (int t = 0; t < T; t++) {
         printf("Progress: %d / %d\n", t, T);
-        printf("compute_rho\n");
+        //printf("compute_rho\n");
         //compute_rho( m, rho, x, y, z, sample_rate, t, TSC_matrix);
-        compute_rho_CIC(m, rho, x, y, z);
-        printf("fftw_execute\n");
+        compute_rho_CIC(m, rho, x, y, z, CIC_matrix, t, sample_rate);
+        //printf("fftw_execute\n");
         #pragma omp single
         fftw_execute(rho_plan);
-        printf("compute_phi_k\n");
+        //printf("compute_phi_k\n");
         compute_phi_k(rho_k);
         #pragma omp single
         fftw_execute(phi_plan);
-        printf("compute_accelerations\n");
+        //printf("compute_accelerations\n");
         compute_accelerations(a_x, a_y, a_z, phi);
-        printf("update_particle\n");
-        //update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z);
-        update_particle_KDK_CIC(x, y, z, vx, vy, vz, a_x, a_y, a_z, phi);
+        //printf("update_particle\n");
+        update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix,phi);
         //update_particle_DKD(x, y, z, vx, vy, vz, a_x, a_y, a_z);
         calculate_energy(m,x,y,z, vx, vy, vz);
         double error = 100*(Es - Et) / Et;
@@ -612,8 +705,8 @@ int main(int argc, char* argv[])
     double total_time_ms = t_end - t_start;
     printf("Time: %f\n", total_time_ms);  
     //output_maze("HITHIT.txt",rho);
-    fftw_destroy_plan(rho_plan);
-    fftw_destroy_plan(phi_plan);
+    //fftw_destroy_plan(rho_plan);
+    //fftw_destroy_plan(phi_plan);
     //printf("free memory!\n");
     /*free(rho);
     //free(phi);
