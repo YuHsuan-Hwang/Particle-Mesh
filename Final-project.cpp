@@ -95,71 +95,61 @@ void NGP(int p, double i, double j, double k, double* rho, double* x, double* y,
         rho[cc * gridN * gridN + bb * gridN + aa] += m[p] / (pow(dx, 3));
     }
 }
-void CIC(int p, double i, double j, double k, double* rho, double* x, double* y, double* z, double* matrix, double* m)
+void CIC(int n, double* m, double* rho, double* x, double* y, double* z )
 {
-    double rx, ry, rz, wx, wy, wz;
-    rx = ry = rz = wx = wy = wz = 0;
-    for (int c = k - 1;c < k + 2;c++)
-        for (int b = j - 1;b < j + 2;b++)
-            for (int a = i - 1;a < i + 2;a++) {
-#pragma omp parallel sections
-                {
-#pragma omp section
-                    {
-                        rx = sqrt(pow((a * dx - (L / 2 - dx / 2)) - x[p], 2));
-                        if (rx <= dx / 2) { wx = 0.75 - pow(rx / dx, 2); }
-                        else if (rx <= 3 * dx / 2 && rx > dx / 2) { wx = pow(1.5 - rx / dx, 2) * 0.5; }
-                        else { wx = 0; }
-                    }
-#pragma omp section           
-                    {
-                        ry = sqrt(pow((b * dx - (L / 2 - dx / 2)) - y[p], 2));
-                        if (ry <= dx / 2) { wy = 0.75 - pow(ry / dx, 2); }
-                        else if (ry <= 3 * dx / 2 && ry > dx / 2) { wy = pow(1.5 - ry / dx, 2) * 0.5; }
-                        else { wy = 0; }
-                    }
-#pragma omp section
-                    {
-                        rz = sqrt(pow((c * dx - (Lz / 2 - dx / 2)) - z[p], 2));
-                        if (rz <= dx / 2) { wz = 0.75 - pow(rz / dx, 2); }
-                        else if (rz <= 3 * dx / 2 && rz > dx / 2) { wz = pow(1.5 - rz / dx, 2) * 0.5; }
-                        else { wz = 0; }
-                    }
+    vector< vector<int> > x_index(N, vector<int>(2, 0));
+    vector< vector<int> > y_index(N, vector<int>(2, 0));
+    vector< vector<int> > z_index(N, vector<int>(2, 0));
+    vector<double> wx(N, 0.0);
+    vector<double> wy(N, 0.0);
+    vector<double> wz(N, 0.0);
+    x_index[n][0] = int((x[n] + L / 2.0) / dx);
+    wx[n] = (x[n] + L / 2.0) / dx - x_index[n][0];
+    if (wx[n] > 0.5) {
+        x_index[n][1] = x_index[n][0];
+        x_index[n][0] += 1;
+    }
+    else {
+        x_index[n][1] = x_index[n][0] + 1;
+        wx[n] = 1.0 - wx[n];
+    }
 
-                }
-                //matrix[(a - (i - 1)) + (b - (j - 1)) * 3 + (c - (k - 1)) * 3 * 3 + p * 27] = wx * wy * wz;
-                int aa, bb, cc;
-#pragma omp parallel sections
-                {
-#pragma omp section
-                    {
-                        if (a >= gridN) { aa = a - gridN; }
-                        else if (a < 0) { aa = a + gridN; }
-                        else { aa = a; }
-                    }
-#pragma omp section
-                    {
-                        if (b >= gridN) { bb = b - gridN; }
-                        else if (b < 0) { bb = b + gridN; }
-                        else { bb = b; }
-                    }
-#pragma omp section
-                    {
-                        if (c >= gridNk) { cc = c - gridNk; }
-                        else if (c < 0) { cc = c + gridNk; }
-                        else { cc = c; }
-                    }
-                }
-#pragma omp critical
-                {
-                    rho[cc * gridN * gridN + bb * gridN + aa] += m[p] * wx * wy * wz / (pow(dx, 3));
-                }
+    // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
+
+    y_index[n][0] = int((y[n] + L / 2.0) / dx);
+    wy[n] = (y[n] + L / 2.0) / dx - y_index[n][0];
+    if (wy[n] > 0.5) {
+        y_index[n][1] = y_index[n][0];
+        y_index[n][0] += 1;
+    }
+    else {
+        y_index[n][1] = y_index[n][0] + 1;
+        wy[n] = 1.0 - wy[n];
+    }
+
+    z_index[n][0] = int((z[n] + L / 2.0) / dx);
+    wz[n] = (z[n] + L / 2.0) / dx - z_index[n][0];
+    if (wz[n] > 0.5) {
+        z_index[n][1] = z_index[n][0];
+        z_index[n][0] += 1;
+    }
+    else {
+        z_index[n][1] = z_index[n][0] + 1;
+        wz[n] = 1.0 - wz[n];
+    }
+
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                rho[x_index[n][i] + gridN * y_index[n][j] + gridN * gridN * z_index[n][k]] += m[n] * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]) / dx / dx / dx;
             }
+        }
+    }
 }
 void TSC(int p,int i,int j, int k, double *rho, double* x, double* y, double* z, double* m , double* matrix)
 {
-    double rx, ry, rz, wx, wy, wz;
-    rx = ry = rz = wx = wy = wz = 0;
+    double rx, ry, rz, Wx, Wy, Wz;
+    rx = ry = rz = Wx = Wy = Wz = 0;
     for (int c = k - 1;c < k + 2;c++)
     for (int b = j - 1;b < j + 2;b++)
     for (int a = i - 1;a < i + 2;a++) {
@@ -168,27 +158,27 @@ void TSC(int p,int i,int j, int k, double *rho, double* x, double* y, double* z,
             #pragma omp section
             {
                 rx = sqrt(pow((a * dx - (L / 2 - dx / 2)) - x[p], 2));
-                if (rx <= dx / 2) { wx = 0.75 - pow(rx / dx, 2); }
-                else if (rx <= 3 * dx / 2 && rx > dx / 2) { wx = pow(1.5 - rx / dx, 2) * 0.5; }
-                else { wx = 0; }
+                if (rx <= dx / 2) { Wx = 0.75 - pow(rx / dx, 2); }
+                else if (rx <= 3 * dx / 2 && rx > dx / 2) { Wx = pow(1.5 - rx / dx, 2) * 0.5; }
+                else { Wx = 0; }
             }
             #pragma omp section           
             {
                 ry = sqrt(pow((b * dx - (L / 2 - dx / 2)) - y[p], 2));
-                if (ry <= dx / 2) { wy = 0.75 - pow(ry / dx, 2); }
-                else if (ry <= 3 * dx / 2 && ry > dx / 2) { wy = pow(1.5 - ry / dx, 2) * 0.5; }
-                else { wy = 0; }
+                if (ry <= dx / 2) { Wy = 0.75 - pow(ry / dx, 2); }
+                else if (ry <= 3 * dx / 2 && ry > dx / 2) { Wy = pow(1.5 - ry / dx, 2) * 0.5; }
+                else { Wy = 0; }
             }
             #pragma omp section
             {
                 rz = sqrt(pow((c * dx - (Lz / 2 - dx / 2)) - z[p], 2));
-                if (rz <= dx / 2) { wz = 0.75 - pow(rz / dx, 2); }
-                else if (rz <= 3 * dx / 2 && rz > dx / 2) { wz = pow(1.5 - rz / dx, 2) * 0.5; }
-                else { wz = 0; }
+                if (rz <= dx / 2) { Wz = 0.75 - pow(rz / dx, 2); }
+                else if (rz <= 3 * dx / 2 && rz > dx / 2) { Wz = pow(1.5 - rz / dx, 2) * 0.5; }
+                else { Wz = 0; }
             }
                     
         }
-        matrix[(a - (i - 1)) + (b - (j - 1)) * 3 + (c - (k - 1)) * 3 * 3 + p * 27] = wx * wy * wz;
+        matrix[(a - (i - 1)) + (b - (j - 1)) * 3 + (c - (k - 1)) * 3 * 3 + p * 27] = Wx * Wy * Wz;
         int aa, bb, cc;
         #pragma omp parallel sections
         {
@@ -213,11 +203,11 @@ void TSC(int p,int i,int j, int k, double *rho, double* x, double* y, double* z,
         }
         #pragma omp critical
         {
-            rho[cc * gridN * gridN + bb * gridN + aa] += m[p] * wx * wy * wz / (pow(dx, 3));
+            rho[cc * gridN * gridN + bb * gridN + aa] += m[p] * Wx * Wy * Wz / (pow(dx, 3));
         }
     }
 }
-//下面這個沒設邊界條件
+//下面這個 TSC_compute_acc 沒設邊界條件
 void TSC_compute_acc(int p, int i, int j, int k, double* matrix, double* acc_x, double* acc_y, double* acc_z)
 {
     double ax, ay, az;
@@ -249,7 +239,8 @@ void compute_rho(double* m,double* rho, double* x, double* y, double* z , int ra
         j = floor((y[p] - (-L / 2)) / dx);
         k = floor((z[p] - (-Lz / 2)) / dx);
         //#pragma omp critical
-        TSC( p,i, j, k, rho,x ,y, z, m, matrix);
+        //CIC(p, m, rho, x, y, z);
+        //TSC( p,i, j, k, rho,x ,y, z, m, matrix);
         //NGP(p, i, j, k, rho, x, y, z, m);
     }
 }
@@ -497,143 +488,10 @@ void calculate_energy(double* m , double* x , double* y , double* z, double* vx,
     Es = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) - G * m[0] * m[1] / rr;
 }
 
-void compute_rho_CIC(double* m, double* rho, double* x, double* y, double* z, double* matrix , int t, int rate)
-    {
-
-        memset(rho, 0, gridNk * gridN * gridN * sizeof(double));
-
-        vector< vector<int> > x_index(N, vector<int>(2, 0));
-        vector< vector<int> > y_index(N, vector<int>(2, 0));
-        vector< vector<int> > z_index(N, vector<int>(2, 0));
-
-        vector<double> wx(N, 0.0);
-        vector<double> wy(N, 0.0);
-        vector<double> wz(N, 0.0);
-
-        for (int n = 0; n < N; n++) {
-            if (file.is_open() && fmod(t, rate) == 0) {
-                if (n != N - 1) { file << x[n] << "," << y[n] << "," << z[n] << ","; }
-                else { file << x[n] << "," << y[n] << "," << z[n] << "\n"; }
-            }
-
-            x_index[n][0] = int((x[n] + L / 2.0) / dx);
-            wx[n] = (x[n] + L / 2.0) / dx - x_index[n][0];
-            if (wx[n] > 0.5) {
-                x_index[n][1] = x_index[n][0];
-                x_index[n][0] += 1;
-            }
-            else {
-                x_index[n][1] = x_index[n][0] + 1;
-                wx[n] = 1.0 - wx[n];
-            }
-
-            // printf("%d %d %f\n",x_index[n][0],x_index[n][1],wx[n]);
-
-            y_index[n][0] = int((y[n] + L / 2.0) / dx);
-            wy[n] = (y[n] + L / 2.0) / dx - y_index[n][0];
-            if (wy[n] > 0.5) {
-                y_index[n][1] = y_index[n][0];
-                y_index[n][0] += 1;
-            }
-            else {
-                y_index[n][1] = y_index[n][0] + 1;
-                wy[n] = 1.0 - wy[n];
-            }
-
-            z_index[n][0] = int((z[n] + L / 2.0) / dx);
-            wz[n] = (z[n] + L / 2.0) / dx - z_index[n][0];
-            if (wz[n] > 0.5) {
-                z_index[n][1] = z_index[n][0];
-                z_index[n][0] += 1;
-            }
-            else {
-                z_index[n][1] = z_index[n][0] + 1;
-                wz[n] = 1.0 - wz[n];
-            }
-
-            for (int i = 0; i < 2; i++) {
-                for (int j = 0; j < 2; j++) {
-                    for (int k = 0; k < 2; k++) {
-                        rho[x_index[n][i] + gridN * y_index[n][j] + gridN * gridN * z_index[n][k]] += m[n] * abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]) / dx / dx / dx;
-                        matrix[z_index[n][k] * 2 * 2 + y_index[n][j] * 2 + x_index[n][i] + 8 * n] = abs(i - wx[n]) * abs(j - wy[n]) * abs(k - wz[n]);
-                    }
-                }
-            }
-
-        }
-
-    }
 
 
-/*void update_particle_KDK_CIC(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* phi)
-{
-    for (int p = 0; p < N; p++) {
-        int i, j, k;
-#pragma omp parallel
-        {
 
-#pragma omp sections
-            {
-#pragma omp section
-                {
-                    x[p] = x[p] + vx[p] * dt;
-                }
-#pragma omp section
-                {
-                    y[p] = y[p] + vy[p] * dt;
-                }
-#pragma omp section
-                {
-                    z[p] = z[p] + vz[p] * dt;
-                }
-            }
-            Kick_CIC(0.5 * dt, x, y, z, vx, vy, vz, phi);
-        }
-        BC_for_particle(p, x, y, z);
-    }
-}
-void update_particle_DKD_CIC(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* phi)
-{
-    for (int p = 0; p < N; p++) {
-        int i, j, k;
-#pragma omp parallel
-        {
-#pragma omp sections
-            {
-#pragma omp section
-                {
-                    x[p] = x[p] + vx[p] *0.5* dt;
-                }
-#pragma omp section
-                {
-                    y[p] = y[p] + vy[p] * 0.5 * dt;
-                }
-#pragma omp section
-                {
-                    z[p] = z[p] + vz[p] * 0.5 * dt;
-                }
-            }
-            Kick_CIC(1.0 * dt, x, y, z, vx, vy, vz, phi);
-#pragma omp sections
-            {
-#pragma omp section
-                {
-                    x[p] = x[p] + vx[p] * 0.5 * dt;
-                }
-#pragma omp section
-                {
-                    y[p] = y[p] + vy[p] * 0.5 * dt;
-                }
-#pragma omp section
-                {
-                    z[p] = z[p] + vz[p] * 0.5 * dt;
-                }
-            }
-        }
-        BC_for_particle(p, x, y, z);
-    }
-}
-*/
+
 int main(int argc, char* argv[])
 {
     fftw_complex* rho_k = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * ((gridN >> 1) + 1) * gridN * gridNk);
@@ -682,8 +540,8 @@ int main(int argc, char* argv[])
     for (int t = 0; t < T; t++) {
         printf("Progress: %d / %d\n", t, T);
         //printf("compute_rho\n");
-        //compute_rho( m, rho, x, y, z, sample_rate, t, TSC_matrix);
-        compute_rho_CIC(m, rho, x, y, z, CIC_matrix, t, sample_rate);
+        compute_rho( m, rho, x, y, z, sample_rate, t, TSC_matrix);
+        //compute_rho_CIC(m, rho, x, y, z, CIC_matrix, t, sample_rate);
         //printf("fftw_execute\n");
         #pragma omp single
         fftw_execute(rho_plan);
