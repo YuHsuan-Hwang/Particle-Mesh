@@ -16,7 +16,7 @@ const double G = 1;         // gravitational constant
 const double dt = 0.01;    // time interval
 const int N = 2 ;           // particle number
 const int gridN = 64;           // # of grid
-const int gridNk = 64;          // # of grid in Z direction
+const int gridNk = gridN;          // # of grid in Z direction
 const int total_grids = gridNk * gridN * gridN ;
 const int T = 300; // simulation time steps
 double Et , Es;    // energy for check 
@@ -226,23 +226,22 @@ void TSC_compute_acc(int p, int i, int j, int k, double* matrix, double* acc_x, 
     acc_y[k * gridN * gridN + j * gridN + i] = ay;
     acc_z[k * gridN * gridN + j * gridN + i] = az;
 }
-void compute_rho(double* m,double* rho, double* x, double* y, double* z , int rate, int t, double* matrix) {
+void compute_rho(double* m,double* rho, double* x, double* y, double* z, int t, double* matrix, int* index, double* data) {
     // Zero-out rho for reuse
     memset(rho, 0, gridNk * gridN * gridN * sizeof(double));
-    //#pragma omp parallel for
+    #pragma omp parallel for
     for (int p = 0; p < N; p++) {
-        int i, j, k;
-        if (file.is_open() && fmod(t, rate) == 0) {
-            if (p != N - 1) { file << x[p] << "," << y[p] << "," << z[p] <<","; }
-            else { file << x[p] << "," << y[p] << "," << z[p] << "\n"; }
-        }
-        i = floor((x[p] - (-L / 2)) / dx);
-        j = floor((y[p] - (-L / 2)) / dx);
-        k = floor((z[p] - (-Lz / 2)) / dx);
+
+        index[3 * p + 0] = floor((x[p] - (-L / 2)) / dx);
+        index[3 * p + 1] = floor((y[p] - (-L / 2)) / dx);
+        index[3 * p + 2] = floor((z[p] - (-Lz / 2)) / dx);
+        data[p * 3 + 0 + t * N * 3] = x[p];
+        data[p * 3 + 1 + t * N * 3] = y[p];
+        data[p * 3 + 2 + t * N * 3] = z[p];
         //#pragma omp critical
         //CIC(p, m, rho, x, y, z);
-        //TSC( p,i, j, k, rho,x ,y, z, m, matrix);
-        NGP(p, i, j, k, rho, x, y, z, m);
+        TSC( p,index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho,x ,y, z, m, matrix);
+        //NGP(p, index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho, x, y, z, m);
     }
 }
 void compute_phi_k(fftw_complex* rho_k ) {
@@ -410,7 +409,7 @@ void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy
         index[p * 3 + 0] = floor((x[p] - (-L / 2)) / dx);
         index[p * 3 + 1] = floor((y[p] - (-L / 2)) / dx);
         index[p * 3 + 2] = floor((z[p] - (-Lz / 2)) / dx);       
-        //TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
+        TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
         vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
         x[p] = x[p] + vx[p] * dt;
         vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
@@ -503,6 +502,7 @@ int main(int argc, char* argv[])
     double* a_x = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* a_y = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* a_z = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
+    double* data = (double*)malloc( T * 3 * N * sizeof(double));
     int* index = (int*)malloc( 3 * N * sizeof(int));
     double* TSC_matrix = (double*)malloc( 27 * N * sizeof(double));
     double* CIC_matrix = (double*)malloc( 8 * N * sizeof(double));
@@ -525,7 +525,7 @@ int main(int argc, char* argv[])
     vy[1] = -5.0;
     vz[0] = 0.0;
     vz[1] = -0.0;
-    //Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
+    Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
     omp_set_num_threads(num_threads);
     fftw_plan_with_nthreads(num_threads);
     fftw_plan rho_plan = fftw_plan_dft_r2c_3d(gridNk, gridN, gridN, rho, rho_k, FFTW_MEASURE);
@@ -535,7 +535,7 @@ int main(int argc, char* argv[])
     for (int t = 0; t < T; t++) {
         printf("Progress: %d / %d\n", t, T);
         //printf("compute_rho\n");
-        compute_rho( m, rho, x, y, z, sample_rate, t, TSC_matrix);
+        compute_rho( m, rho, x, y, z, t, TSC_matrix, index,data);
         //printf("fftw_execute\n");
         #pragma omp single
         fftw_execute(rho_plan);
@@ -548,10 +548,17 @@ int main(int argc, char* argv[])
         //printf("update_particle\n");
         update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix,phi, index);
         //update_particle_DKD(x, y, z, vx, vy, vz, a_x, a_y, a_z);
-        //calculate_energy(m,x,y,z, vx, vy, vz);
-        //double error = 100*(Es - Et) / Et;
-        //printf("Error; %f\n", error); 
+        calculate_energy(m,x,y,z, vx, vy, vz);
+        double error = 100*(Es - Et) / Et;
+        printf("Error; %f\n", error); 
         //output_maze("HITHIT.txt", rho);
+    }
+    printf("Output data..,\n");
+    for (int i = 0; i < N * 3 * T; i++) {
+        if (file.is_open()) {
+            if (fmod(i, N * 3) != N * 3-1) { file << data[i] << ","; }
+            else { file << data[i] << "\n"; }
+        }
     }
     double t_end = omp_get_wtime();
     double total_time_ms = t_end - t_start;
