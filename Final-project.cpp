@@ -13,12 +13,12 @@ using namespace std;
 // global constants
 const double G_scaled = 39.5 ; // Time in years, distances in AU, mass in solar masses
 const double G = 1;         // gravitational constant
-const double dt = 0.01;    // time interval
-const int N = 2 ;           // particle number
+const double dt = 0.1;    // time interval
+const int N = 800000 ;           // particle number
 const int gridN = 64;           // # of grid
 const int gridNk = gridN;          // # of grid in Z direction
 const int total_grids = gridNk * gridN * gridN ;
-const int T = 300; // simulation time steps
+const int T = 100; // simulation time steps
 double Et , Es;    // energy for check 
 const double L = 30;      // box size
 const double Lz = L * gridNk / gridN;       // box size
@@ -240,8 +240,8 @@ void compute_rho(double* m,double* rho, double* x, double* y, double* z, int t, 
         data[p * 3 + 2 + t * N * 3] = z[p];
         //#pragma omp critical
         //CIC(p, m, rho, x, y, z);
-        TSC( p,index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho,x ,y, z, m, matrix);
-        //NGP(p, index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho, x, y, z, m);
+        //TSC( p,index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho,x ,y, z, m, matrix);
+        NGP(p, index[3 * p + 0], index[3 * p + 1], index[3 * p + 2], rho, x, y, z, m);
     }
 }
 void compute_phi_k(fftw_complex* rho_k ) {
@@ -409,7 +409,7 @@ void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy
         index[p * 3 + 0] = floor((x[p] - (-L / 2)) / dx);
         index[p * 3 + 1] = floor((y[p] - (-L / 2)) / dx);
         index[p * 3 + 2] = floor((z[p] - (-Lz / 2)) / dx);       
-        TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
+        //TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
         vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
         x[p] = x[p] + vx[p] * dt;
         vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
@@ -423,39 +423,24 @@ void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy
     }
 }
          
-void update_particle_DKD(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, int* index)
+void update_particle_DKD(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* matrix, int* index)
 {
+    //CIC_compute_acc(x, y, z, phi, a_x, a_y, a_z);
+    #pragma omp parallel for
     for (int p = 0; p < N; p++) {
-        #pragma omp parallel
-        {
-            #pragma omp single
-            {
-                index[ 3 * p + 0 ] = floor((x[p] - (-L / 2)) / dx);
-                index[ 3 * p + 1 ] = floor((y[p] - (-L / 2)) / dx);
-                index[ 3 * p + 2 ] = floor((z[p] - (-Lz / 2)) / dx);
-            }
-            #pragma omp sections
-            {
-                #pragma omp section
-                {
-                    x[p] = x[p] + vx[p] * 0.5 * dt;
-                    vx[p] = vx[p] + a_x[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
-                    x[p] = x[p] + vx[p] * 0.5 * dt;
-                }
-                #pragma omp section
-                {
-                    y[p] = y[p] + vy[p] * 0.5 * dt;
-                    vy[p] = vy[p] + a_y[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
-                    y[p] = y[p] + vy[p] * 0.5 * dt;
-                }
-                #pragma omp section
-                {
-                    z[p] = z[p] + vz[p] * 0.5 * dt;
-                    vz[p] = vz[p] + a_z[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
-                    z[p] = z[p] + vz[p] * 0.5 * dt;
-                }
-            }
-        }
+        index[p * 3 + 0] = floor((x[p] - (-L / 2)) / dx);
+        index[p * 3 + 1] = floor((y[p] - (-L / 2)) / dx);
+        index[p * 3 + 2] = floor((z[p] - (-Lz / 2)) / dx);
+        //TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
+        x[p] = x[p] + vx[p] * 0.5 * dt;
+        vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] *  dt;
+        x[p] = x[p] + vx[p] * 0.5 * dt;
+        y[p] = y[p] + vy[p] * 0.5 * dt;
+        vy[p] = vy[p] + a_y[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * dt;
+        y[p] = y[p] + vy[p] * 0.5 * dt;
+        z[p] = z[p] + vz[p] * 0.5 * dt;
+        vz[p] = vz[p] + a_z[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * dt;
+        z[p] = z[p] + vz[p] * 0.5 * dt;
         BC_for_particle(p, x, y, z);
     }
 }
@@ -471,10 +456,10 @@ void calculate_energy(double* m , double* x , double* y , double* z, double* vx,
 void assign(int N, double* m, double* x, double* y, double* z, double* vx, double* vy, double* vz)
 {
     srand(time(NULL));
-    double min = - 0.36 * L ;
-    double max = 0.41 * L ;
+    double min = - 0.3 * L ;
+    double max = 0.3 * L ;
     for (int i = 0; i < N; i++) {
-        m[i] = 100.0;
+        m[i] = 2.0;
         x[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
         y[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
         z[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
@@ -510,8 +495,8 @@ int main(int argc, char* argv[])
     for (int i = 0; i < N; i++) {
         TSC_matrix[13 + i * 27] = 1.0;
     }
-    //assign(N, m, x, y, z, vx,vy,vz);
-    m[0] = 400.0;
+    assign(N, m, x, y, z, vx,vy,vz);
+    /*m[0] = 400.0;
     m[1] = 400.0;
     x[0] = 4.0;
     x[1] = -4.0;
@@ -524,13 +509,13 @@ int main(int argc, char* argv[])
     vy[0] = 5.0;
     vy[1] = -5.0;
     vz[0] = 0.0;
-    vz[1] = -0.0;
-    Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
+    vz[1] = -0.0;*/
+    //Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
     omp_set_num_threads(num_threads);
     fftw_plan_with_nthreads(num_threads);
     fftw_plan rho_plan = fftw_plan_dft_r2c_3d(gridNk, gridN, gridN, rho, rho_k, FFTW_MEASURE);
     fftw_plan phi_plan = fftw_plan_dft_c2r_3d(gridNk, gridN, gridN, rho_k, phi, FFTW_MEASURE);
-    file.open("Data.csv", ios::out);
+    //file.open("Data.csv", ios::out);
     double t_start = omp_get_wtime();
     for (int t = 0; t < T; t++) {
         printf("Progress: %d / %d\n", t, T);
@@ -547,22 +532,22 @@ int main(int argc, char* argv[])
         compute_accelerations(a_x, a_y, a_z, phi);
         //printf("update_particle\n");
         update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix,phi, index);
-        //update_particle_DKD(x, y, z, vx, vy, vz, a_x, a_y, a_z);
-        calculate_energy(m,x,y,z, vx, vy, vz);
-        double error = 100*(Es - Et) / Et;
-        printf("Error; %f\n", error); 
+        //update_particle_DKD(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix, index);
+        //calculate_energy(m,x,y,z, vx, vy, vz);
+        //double error = 100*(Es - Et) / Et;
+        //printf("Error; %f\n", error); 
         //output_maze("HITHIT.txt", rho);
     }
+    double t_end = omp_get_wtime();
+    double total_time_ms = t_end - t_start;
+    printf("Time: %f\n", total_time_ms);
     printf("Output data..,\n");
     for (int i = 0; i < N * 3 * T; i++) {
         if (file.is_open()) {
             if (fmod(i, N * 3) != N * 3-1) { file << data[i] << ","; }
             else { file << data[i] << "\n"; }
         }
-    }
-    double t_end = omp_get_wtime();
-    double total_time_ms = t_end - t_start;
-    printf("Time: %f\n", total_time_ms);  
+    }  
     //output_maze("HITHIT.txt",rho);
     //fftw_destroy_plan(rho_plan);
     //fftw_destroy_plan(phi_plan);
