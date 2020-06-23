@@ -7,12 +7,13 @@
 #include <stdlib.h> 
 #include <string>
 #include <fstream>
+#include <time.h>
 using namespace std;
 #define _USE_MATH_DEFINES
 // global constants
 const double G_scaled = 39.5 ; // Time in years, distances in AU, mass in solar masses
 const double G = 1;         // gravitational constant
-const double dt = 0.005;    // time interval
+const double dt = 0.01;    // time interval
 const int N = 2 ;           // particle number
 const int gridN = 64;           // # of grid
 const int gridNk = 64;          // # of grid in Z direction
@@ -25,7 +26,7 @@ const double PI = 3.1416;
 const double dx = L / gridN;    // grid size 
 const int sample_rate = 1; 
 fstream file;             //宣告 file
-int num_threads = 1;     // for openMP
+int num_threads = 4;     // for openMP
 
 void BC_for_particle(int p , double* x, double* y, double* z)
 {
@@ -241,7 +242,7 @@ void compute_rho(double* m,double* rho, double* x, double* y, double* z , int ra
         //#pragma omp critical
         //CIC(p, m, rho, x, y, z);
         //TSC( p,i, j, k, rho,x ,y, z, m, matrix);
-        //NGP(p, i, j, k, rho, x, y, z, m);
+        NGP(p, i, j, k, rho, x, y, z, m);
     }
 }
 void compute_phi_k(fftw_complex* rho_k ) {
@@ -401,77 +402,57 @@ void compute_accelerations(double* acc_x, double* acc_y, double* acc_z, double* 
             }
     }
 }
-void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* matrix, double*phi)
+void update_particle_KDK(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, double* matrix, double*phi, int* index)
 {
-    CIC_compute_acc(x, y, z, phi, a_x, a_y, a_z);
+    //CIC_compute_acc(x, y, z, phi, a_x, a_y, a_z);
+    #pragma omp parallel for
     for (int p = 0; p < N; p++) {
-        int i, j, k;
-        #pragma omp parallel
-        {
-            #pragma omp single
-            {
-                i = floor((x[p] - (-L / 2)) / dx);
-                j = floor((y[p] - (-L / 2)) / dx);
-                k = floor((z[p] - (-Lz / 2)) / dx);
-            }
-            //TSC_compute_acc(p, i, j, k, matrix, a_x, a_y, a_z);
-            
-            #pragma omp sections
-            {
-                #pragma omp section
-                {
-                    vx[p] = vx[p] + a_x[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                    
-                    x[p] = x[p] + vx[p] * dt;
-                    vx[p] = vx[p] + a_x[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                }
-                #pragma omp section
-                {
-                    vy[p] = vy[p] + a_y[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                    y[p] = y[p] + vy[p] * dt ;
-                    vy[p] = vy[p] + a_y[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                }
-                #pragma omp section
-                {
-                    vz[p] = vz[p] + a_z[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                    z[p] = z[p] + vz[p] * dt;
-                    vz[p] = vz[p] + a_z[k * gridN * gridN + j * gridN + i] * 0.5 * dt;
-                }
-            }
-        }
+        index[p * 3 + 0] = floor((x[p] - (-L / 2)) / dx);
+        index[p * 3 + 1] = floor((y[p] - (-L / 2)) / dx);
+        index[p * 3 + 2] = floor((z[p] - (-Lz / 2)) / dx);       
+        //TSC_compute_acc(p, index[p * 3 + 0], index[p * 3 + 1], index[p * 3 + 2], matrix, a_x, a_y, a_z);
+        vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
+        x[p] = x[p] + vx[p] * dt;
+        vx[p] = vx[p] + a_x[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
+        vy[p] = vy[p] + a_y[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
+        y[p] = y[p] + vy[p] * dt;
+        vy[p] = vy[p] + a_y[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
+        vz[p] = vz[p] + a_z[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
+        z[p] = z[p] + vz[p] * dt;
+        vz[p] = vz[p] + a_z[index[p * 3 + 2] * gridN * gridN + index[p * 3 + 1] * gridN + index[p * 3 + 0]] * 0.5 * dt;
         BC_for_particle(p, x, y, z);
     }
 }
-void update_particle_DKD(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z)
+         
+void update_particle_DKD(double* x, double* y, double* z, double* vx, double* vy, double* vz, double* a_x, double* a_y, double* a_z, int* index)
 {
     for (int p = 0; p < N; p++) {
-        int i, j, k;
         #pragma omp parallel
         {
             #pragma omp single
             {
-                i = floor((x[p] - (-L / 2)) / dx);
-                j = floor((y[p] - (-L / 2)) / dx);
-                k = floor((z[p] - (-Lz / 2)) / dx);
+                index[ 3 * p + 0 ] = floor((x[p] - (-L / 2)) / dx);
+                index[ 3 * p + 1 ] = floor((y[p] - (-L / 2)) / dx);
+                index[ 3 * p + 2 ] = floor((z[p] - (-Lz / 2)) / dx);
             }
             #pragma omp sections
             {
                 #pragma omp section
                 {
                     x[p] = x[p] + vx[p] * 0.5 * dt;
-                    vx[p] = vx[p] + a_x[k * gridN * gridN + j * gridN + i] * dt;
+                    vx[p] = vx[p] + a_x[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
                     x[p] = x[p] + vx[p] * 0.5 * dt;
                 }
                 #pragma omp section
                 {
                     y[p] = y[p] + vy[p] * 0.5 * dt;
-                    vy[p] = vy[p] + a_y[k * gridN * gridN + j * gridN + i] * dt;
+                    vy[p] = vy[p] + a_y[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
                     y[p] = y[p] + vy[p] * 0.5 * dt;
                 }
                 #pragma omp section
                 {
                     z[p] = z[p] + vz[p] * 0.5 * dt;
-                    vz[p] = vz[p] + a_z[k * gridN * gridN + j * gridN + i] * dt;
+                    vz[p] = vz[p] + a_z[index[3 * p + 2] * gridN * gridN + index[3 * p + 1] * gridN + index[3 * p + 0]] * dt;
                     z[p] = z[p] + vz[p] * 0.5 * dt;
                 }
             }
@@ -488,7 +469,21 @@ void calculate_energy(double* m , double* x , double* y , double* z, double* vx,
     Es = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) - G * m[0] * m[1] / rr;
 }
 
-
+void assign(int N, double* m, double* x, double* y, double* z, double* vx, double* vy, double* vz)
+{
+    srand(time(NULL));
+    double min = - 0.36 * L ;
+    double max = 0.41 * L ;
+    for (int i = 0; i < N; i++) {
+        m[i] = 100.0;
+        x[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
+        y[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
+        z[i] = (max - min) * rand() / (RAND_MAX + 1.0) + min;
+        vx[i] = 0.0;
+        vy[i] = 0.0;
+        vz[i] = 0.0;
+    }
+}
 
 
 
@@ -508,40 +503,39 @@ int main(int argc, char* argv[])
     double* a_x = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* a_y = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
     double* a_z = (double*)malloc(gridNk * gridN * gridN * sizeof(double));
+    int* index = (int*)malloc( 3 * N * sizeof(int));
     double* TSC_matrix = (double*)malloc( 27 * N * sizeof(double));
     double* CIC_matrix = (double*)malloc( 8 * N * sizeof(double));
 
     for (int i = 0; i < N; i++) {
         TSC_matrix[13 + i * 27] = 1.0;
     }
-    m[0] = 800.0 ;
-    m[1] = 800.0 ;
-    x[0] = -2.0;
-    x[1] = 2.0;
+    //assign(N, m, x, y, z, vx,vy,vz);
+    m[0] = 400.0;
+    m[1] = 400.0;
+    x[0] = 4.0;
+    x[1] = -4.0;
     y[0] = 0.0;
     y[1] = -0.0;
     z[0] = 0.0;
-    z[1] = 0.0;
+    z[1] = -0.0;
     vx[0] = 0.0;
     vx[1] = -0.0;
-    vy[0] = 10.0;
-    vy[1] = -10.0;
+    vy[0] = 5.0;
+    vy[1] = -5.0;
     vz[0] = 0.0;
-    vz[1] = -0.0; 
-    Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
+    vz[1] = -0.0;
+    //Et = 0.5 * m[0] * (vx[0] * vx[0] + vy[0] * vy[0] + vz[0] * vz[0]) + 0.5 * m[1] * (vx[1] * vx[1] + vy[1] * vy[1] + vz[1] * vz[1]) -G * m[0] * m[1] / fabs(x[1] - x[0]);
     omp_set_num_threads(num_threads);
     fftw_plan_with_nthreads(num_threads);
     fftw_plan rho_plan = fftw_plan_dft_r2c_3d(gridNk, gridN, gridN, rho, rho_k, FFTW_MEASURE);
     fftw_plan phi_plan = fftw_plan_dft_c2r_3d(gridNk, gridN, gridN, rho_k, phi, FFTW_MEASURE);
-    //vector< vector< vector<double> > > maze  ( gridN, vector< vector<double> > ( gridN, vector<double>(gridN, 0.0) ) ); // density
     file.open("Data.csv", ios::out);
     double t_start = omp_get_wtime();
-    
     for (int t = 0; t < T; t++) {
         printf("Progress: %d / %d\n", t, T);
         //printf("compute_rho\n");
         compute_rho( m, rho, x, y, z, sample_rate, t, TSC_matrix);
-        //compute_rho_CIC(m, rho, x, y, z, CIC_matrix, t, sample_rate);
         //printf("fftw_execute\n");
         #pragma omp single
         fftw_execute(rho_plan);
@@ -552,11 +546,11 @@ int main(int argc, char* argv[])
         //printf("compute_accelerations\n");
         compute_accelerations(a_x, a_y, a_z, phi);
         //printf("update_particle\n");
-        update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix,phi);
+        update_particle_KDK(x, y, z, vx, vy, vz, a_x, a_y, a_z, TSC_matrix,phi, index);
         //update_particle_DKD(x, y, z, vx, vy, vz, a_x, a_y, a_z);
-        calculate_energy(m,x,y,z, vx, vy, vz);
-        double error = 100*(Es - Et) / Et;
-        printf("Error; %f\n", error); 
+        //calculate_energy(m,x,y,z, vx, vy, vz);
+        //double error = 100*(Es - Et) / Et;
+        //printf("Error; %f\n", error); 
         //output_maze("HITHIT.txt", rho);
     }
     double t_end = omp_get_wtime();
